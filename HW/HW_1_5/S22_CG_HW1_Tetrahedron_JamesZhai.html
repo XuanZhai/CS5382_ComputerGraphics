@@ -1,0 +1,292 @@
+
+<html>
+
+<!-- VERTEX SHADER SOURCE CODE: Written in GLSL -->
+<script id="vertex-shader" type="x-shader/x-vertex">
+#version 300 es
+
+in vec4 aPosition;
+in vec4 aColor;
+out vec4 vColor;
+uniform vec3 uTheta;
+uniform vec4 uOffset;
+
+void main()
+{
+    vec3 angles =  uTheta ; // convert degrees to radians
+    vec3 c = cos( angles );
+    vec3 s = sin( angles );
+
+    // Remeber: thse matrices are column-major
+    mat4 rx = mat4( 1.0,  0.0,  0.0, 0.0,
+		    0.0,  c.x,  s.x, 0.0,
+		    0.0, -s.x,  c.x, 0.0,
+		    0.0,  0.0,  0.0, 1.0 );
+
+    mat4 ry = mat4( c.y, 0.0, -s.y, 0.0,
+		    0.0, 1.0,  0.0, 0.0,
+		    s.y, 0.0,  c.y, 0.0,
+		    0.0, 0.0,  0.0, 1.0 );
+
+
+    mat4 rz = mat4( c.z, s.z, 0.0, 0.0,
+		    -s.z,  c.z, 0.0, 0.0,
+		    0.0,  0.0, 1.0, 0.0,
+		    0.0,  0.0, 0.0, 1.0 );
+
+  gl_Position = rz * ry * rx * (aPosition - uOffset);
+  gl_PointSize = 30.0;
+  vColor = aColor;
+}
+</script>
+
+
+<!-- FRAGMENT SHADER SOURCE CODE: Written in GLSL -->
+<script id="fragment-shader" type="x-shader/x-fragment">
+#version 300 es
+
+precision mediump float;
+
+out vec4  fColor;
+in vec4 vColor;
+
+void main()
+{
+    fColor = vColor;
+}
+</script>
+
+<canvas id="gl-canvas" width="512" height="512"> </canvas>
+
+<div>
+    Move on X-axis: 0 <input id="xslider" type = "range" min = "-1.0" max = "1.0" step = "0.01" value = "0" />
+    1
+</div>
+
+<div>
+    Move on Z-axis: 0 <input id="zslider" type = "range" min = "-1.0" max = "1.0" step = "0.01" value = "0" />
+    1
+</div>
+
+<div>
+    <button id= "xButton">Rotate X</button>
+    <button id= "yButton">Rotate Y</button>
+    <button id= "zButton">Rotate Z</button>
+</div>
+
+<div>
+    <button id = "ButtonR">PauseRotation</button>
+</div>
+
+<div>
+    <button id = "ButtonT">Axis Toggle</button>
+</div>
+
+<!-- Written in Javascript -->
+<script>
+var canvas;       // Browser-managed drawing area on screen
+var gl;           // This is the drawing context
+var program;      // Compiled and linked GPU code
+var points;       // array of vertices as (x,y) pairs
+var colors;
+var angle = 3.14;
+var thetaLoc;
+var uOffsetLoc;
+var x = 0.0;
+var z = 0.0;
+var Tflag = true;
+var axis = 0;			// Currently active axis of rotation
+var xAxis = 0;			//  Will be assigned on of these codes for
+var yAxis =1;			//  
+var zAxis = 2;
+
+var theta = [0, 0, 0];		// Rotation angles for x, y and z axes
+var flag = true;		// Toggle Rotation Control
+
+// This compiles and links the shaders to create a GPU program object
+// The GLSL code above is parsed and provided as the source code
+function initShaders( gl, vertexShaderId, fragmentShaderId )
+{
+    var vertShdr;
+    var fragShdr;
+
+    var vertElem = document.getElementById( vertexShaderId );
+    if ( !vertElem ) {
+        alert( "Unable to load vertex shader " + vertexShaderId );
+        return -1;
+    }
+    else {
+        vertShdr = gl.createShader( gl.VERTEX_SHADER );
+        gl.shaderSource( vertShdr, vertElem.textContent.replace(/^\s+|\s+$/g, '' ));
+        gl.compileShader( vertShdr );
+        if ( !gl.getShaderParameter(vertShdr, gl.COMPILE_STATUS) ) {
+            var msg = "Vertex shader failed to compile.  The error log is:"
+        	+ "<pre>" + gl.getShaderInfoLog( vertShdr ) + "</pre>";
+            alert( msg );
+            return -1;
+        }
+    }
+
+    var fragElem = document.getElementById( fragmentShaderId );
+    if ( !fragElem ) {
+        alert( "Unable to load vertex shader " + fragmentShaderId );
+        return -1;
+    }
+    else {
+        fragShdr = gl.createShader( gl.FRAGMENT_SHADER );
+        gl.shaderSource( fragShdr, fragElem.textContent.replace(/^\s+|\s+$/g, '' ) );
+        gl.compileShader( fragShdr );
+        if ( !gl.getShaderParameter(fragShdr, gl.COMPILE_STATUS) ) {
+            var msg = "Fragment shader failed to compile.  The error log is:"
+        	+ "<pre>" + gl.getShaderInfoLog( fragShdr ) + "</pre>";
+            alert( msg );
+            return -1;
+        }
+    }
+
+    var program = gl.createProgram();
+    gl.attachShader( program, vertShdr );
+    gl.attachShader( program, fragShdr );
+    gl.linkProgram( program );
+
+    if ( !gl.getProgramParameter(program, gl.LINK_STATUS) ) {
+        var msg = "Shader program failed to link.  The error log is:"
+            + "<pre>" + gl.getProgramInfoLog( program ) + "</pre>";
+        alert( msg );
+        return -1;
+    }
+
+    return program;
+}
+
+
+function initializePoints(){
+    var pointsvert = [0.0,0.2,0.0, 0.0,-0.2,0.1, 0.2,-0.2,-0.1, -0.2,-0.2,-0.1, 0.0,-0.2,0.1];      // The vertices for the triangle
+    var colorvert = [
+        0.5,0.2,0.8,1.0,
+        0.5,0.2,0.8,1.0,
+        0.5,0.2,0.8,1.0,
+        0.5,0.2,0.8,1.0,
+        0.5,0.2,0.8,1.0,
+    ]
+
+    var points2vert = [1.0,0.0,0.0,-1.0,0.0,0.0, 0.0,1.0,0.0,0.0,-1.0,0.0, 0.0,0.0,1.0, 0.0,0.0,-1.0];  // The coordinates
+    var color2vert = [
+        1.0,0.0,0.0,0.8,
+        1.0,0.0,0.0,0.8,
+        0.0,1.0,0.0,0.8,
+        0.0,1.0,0.0,0.8,
+        0.0,0.0,1.0,0.8,
+        0.0,0.0,1.0,0.8,
+    ]
+
+    pointsvert = pointsvert.concat(points2vert);
+    colorvert = colorvert.concat(color2vert);
+    points = new Float32Array(pointsvert);
+    colors = new Float32Array(colorvert);               // Combine those arrays and convert them
+}
+
+
+function initializeGPUBuffers(){
+    var pointsBuffer = gl.createBuffer();
+    gl.bindBuffer( gl.ARRAY_BUFFER, pointsBuffer );
+    gl.bufferData( gl.ARRAY_BUFFER, points, gl.STATIC_DRAW );  
+    
+    // Associate out shader variables with our data buffer
+    var aPosition = gl.getAttribLocation( program, "aPosition" );
+    
+    gl.vertexAttribPointer( aPosition, 3, gl.FLOAT, false, 0, 0);    // (x,y) floating point values provided
+    gl.enableVertexAttribArray( aPosition );  
+    
+    var colorBuffer = gl.createBuffer();
+    gl.bindBuffer( gl.ARRAY_BUFFER, colorBuffer );
+    gl.bufferData( gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW );  
+    
+    var aColor = gl.getAttribLocation( program, "aColor");
+    gl.vertexAttribPointer(aColor, 4,gl.FLOAT,false, 0, 0);
+    gl.enableVertexAttribArray(aColor);  
+
+    thetaLoc = gl.getUniformLocation(program, "uTheta");
+    uOffsetLoc = gl.getUniformLocation( program, "uOffset" ); 
+}
+
+
+
+
+// EXECUTION: Code executes starting here when we launch this file
+window.onload = function init()
+{
+    canvas = document.getElementById( "gl-canvas" );
+
+    gl = canvas.getContext('webgl2');                   // Create Graphics Device Context
+    if (!gl) { alert( "WebGL 2.0 isn't available" ); }
+
+    document.getElementById("xslider").onpointermove = function(event){
+        x = event.target.value;
+    }
+
+    document.getElementById("zslider").onpointermove = function(event){
+        z = event.target.value;
+    }
+
+    document.getElementById("ButtonT").onclick = function(){
+        if(Tflag == true){
+            Tflag = false;
+        }
+        else{
+            Tflag = true;
+        }
+    };
+
+    document.getElementById( "xButton" ).onclick = function () {
+        axis = xAxis;
+    };
+    document.getElementById( "yButton" ).onclick = function () {
+        axis = yAxis;
+    };
+    document.getElementById( "zButton" ).onclick = function () {
+        axis = zAxis;
+    };
+    document.getElementById("ButtonR").onclick = function(){flag = !flag;};
+
+    gl.viewport( 0, 0, canvas.width, canvas.height ); 
+    
+    // Configure color to use to clear all pixels  
+    //              Red  Green  Blue  Alpha   
+     gl.clearColor(0.8, 0.8, 0.8, 1.0);  
+     gl.enable(gl.DEPTH_TEST);;
+
+
+    //  Compile and link shaders to create a program object in the Graphics Device Context
+    program = initShaders( gl, "vertex-shader", "fragment-shader" );
+    gl.useProgram( program );
+
+    initializePoints();
+    initializeGPUBuffers();
+    render();
+};
+
+
+function render()
+{
+   // Configure area of canvas to map framebuffer
+ 
+     // Render
+    gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if(flag) theta[axis] += 0.017;	// Increment rotation of currently active axis of rotation in radians
+    gl.uniform3fv(thetaLoc, theta);	// Update uniform in vertex shader with new rotation angle
+
+    gl.uniform4fv(uOffsetLoc, [x, 0.0, z, 0.0]);
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, 5);
+    if(Tflag == true){
+        gl.uniform4fv(uOffsetLoc, [0.0, 0.0, 0.0, 0.0]);
+        gl.drawArrays(gl.LINES, 5, 2);
+        gl.drawArrays(gl.LINES, 7, 2);
+        gl.drawArrays(gl.LINES, 9, 2);
+    }
+    requestAnimationFrame(render);
+}
+
+</script>
+
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+#version 300 es
+
+const int nLight = 5;               // Number of lights
+in  vec4 aPosition;
+in  vec4 aNormal;
+in vec2 aTexCoord;
+
+
+out vec3 N,E;
+out vec3 L[nLight];           
+out vec2 vTexCoord;
+
+uniform vec3 uTheta;
+uniform vec3 uScale;
+uniform vec4 uDisplacement;
+
+uniform mat4 modelViewMatrix;      // Two uniform matrix.
+uniform mat4 projectionMatrix;
+uniform vec4 uLightPositions[nLight];
+
+
+uniform mat3 uNormalMatrix;
+
+void main()
+{
+    vec3 light;
+    vec3 pos = (modelViewMatrix * aPosition).xyz;
+
+    for(int i = 0; i < nLight; i++){                        // Loop through each light
+        if(uLightPositions[i].z == 0.0){
+            L[i] = normalize(uLightPositions[i].xyz);
+        }
+        else{
+            L[i] = normalize(uLightPositions[i]).xyz - aPosition.xyz;
+        }
+    }
+
+    E = -normalize(pos);
+    N = normalize(uNormalMatrix*aNormal.xyz);
+
+    gl_Position =  projectionMatrix * modelViewMatrix * aPosition;    // Rotate first.
+    gl_PointSize = 18.0;         // Required to be able to see individual points.
+    vTexCoord = aTexCoord;
+}
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+#version 300 es
+
+precision mediump float;
+
+
+const int nLight = 5;
+in vec3 N,E;
+in vec3 L[nLight];
+in vec2 vTexCoord;
+
+out vec4 fColor;
+
+uniform vec4 uAmbientProducts[nLight];
+uniform vec4 uDiffuseProducts[nLight];
+uniform vec4 uSpecularProducts[nLight];
+uniform float uShininess;
+
+uniform sampler2D uTextureMap;
+uniform sampler2D uTextureMap2;                 // There are two textures
+
+uniform int texTrigger;
+
+// A function which will create the light data based on the parameters
+vec4 createLight(vec3 nL, vec3 nE, vec3 nN, vec4 nAmbientProduct, vec4 nDiffuseProduct, vec4 nSpecularProduct, float nShininess){
+    vec3 H = normalize( nL + nE );
+    vec4 ambient = nAmbientProduct;
+
+    float Kd = max( dot(nL, nN), 0.0 );
+    vec4  diffuse = Kd*nDiffuseProduct;
+
+    float Ks = pow( max(dot(nN, H), 0.0), nShininess );
+    vec4  specular = Ks * nSpecularProduct;
+
+    if( dot(nL, nN) < 0.0 ) specular = vec4(0.0, 0.0, 0.0, 1.0);
+
+    return (ambient + diffuse +specular);
+}
+
+
+void main()
+{
+    vec4 tempColor;
+    for(int i = 0; i < nLight; i++){
+        tempColor += createLight(L[i],E,N,uAmbientProducts[i], uDiffuseProducts[i], uSpecularProducts[i], uShininess);
+    }
+
+    if(texTrigger == 0){                   // No texture applied
+        fColor = tempColor;
+    }
+    else if(texTrigger == 1){               // The terrain texture applied
+        fColor = tempColor * texture(uTextureMap, vTexCoord );
+    }
+    else{                                   // The camouflage texture applied 
+        fColor = tempColor * texture(uTextureMap2, vTexCoord );
+    }
+
+    fColor.a = 1.0;
+}
+</script>
+
+<script type="text/javascript" src="../Common/initShaders.js"></script>
+<script type="text/javascript" src="../Common/MVnew.js"></script>
+<script type="text/javascript" src="CG_S22_Program3_Zhai_James.js"></script>
+<script type="text/javascript" src="CG_S22_Program3_Zhai_James_Vertices.js"></script>
+
+<body>
+<canvas id="gl-canvas" width="1024"" height="1024">
+Oops ... your browser doesn't support the HTML5 canvas element
+</canvas>
+
+<br/>
+
+<div>
+    Rotate on Azimuth angle: -90° <input id="xslider" type = "range" min = "-90" max = "90.0" step = "1" value = "0" />
+    90°
+</div>
+
+<div>
+    Rotate on Elevation angle: 0° <input id="yslider" type = "range" min = "0" max = "90.0" step = "1" value = "0" />
+    90°
+</div>
+
+<div>
+    Change Ambient <input id="Aslider" type = "range" min = "0" max = "1" step = "0.1" value = "0.7" />
+</div>
+
+<div>
+    Change Diffuse <input id="Dslider" type = "range" min = "0" max = "1" step = "0.1" value = "0.7" />
+</div>
+
+<div>
+    Change Specular <input id="Sslider" type = "range" min = "0" max = "1" step = "0.1" value = "0.8" />
+</div>
+
+<div>
+    W = Forward; 
+    S = Backward;  
+    A = Rotate Left; 
+    D = Rotate Right; 
+    Q = Turret Left; 
+    E = Turret Right; 
+    Space = Sniper Mode;
+    F = Fire; 
+</div>
+
+<div>
+    <button id = "ButtonR">Reset</button>
+</div>
+
+<div>
+    <button id = "Disco">Disco Mode 1</button>
+</div>
+
+<div>
+    <button id = "Disco2">Disco Mode 2</button>
+</div>
+
+</body>
+</html>
